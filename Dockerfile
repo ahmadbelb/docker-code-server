@@ -1,68 +1,70 @@
-FROM ubuntu:20.04
-FROM ghcr.io/linuxserver/baseimage-ubuntu:bionic
+# Start from the code-server Debian base image
+FROM codercom/code-server:3.12.0
 
-# set version label
-ARG BUILD_DATE
-ARG VERSION
-ARG CODE_RELEASE
-LABEL build_version="Linuxserver.io version:- ${VERSION} Build-date:- ${BUILD_DATE}"
-LABEL maintainer="aptalca"
+USER coder
 
-# environment settings
-ENV HOME="/config"
+# Apply VS Code settings
+COPY deploy-container/settings.json .local/share/code-server/User/settings.json
 
-RUN \
-  echo "**** install node repo ****" && \
-  apt-get update && \
-  apt-get install -y \
-    gnupg && \
-  curl -s https://deb.nodesource.com/gpgkey/nodesource.gpg.key | apt-key add - && \
-  echo 'deb https://deb.nodesource.com/node_14.x bionic main' \
-    > /etc/apt/sources.list.d/nodesource.list && \
-  curl -s https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add - && \
-  echo 'deb https://dl.yarnpkg.com/debian/ stable main' \
-    > /etc/apt/sources.list.d/yarn.list && \
-  echo "**** install build dependencies ****" && \
-  apt-get update && \
-  apt-get install -y \
-    build-essential \
-    libx11-dev \
-    libxkbfile-dev \
-    libsecret-1-dev \
-    pkg-config && \
-  echo "**** install runtime dependencies ****" && \
-  apt-get install -y \
-    git \
-    jq \
-    nano \
-    net-tools \
-    nodejs \
-    sudo \
-    yarn && \
-  echo "**** install code-server ****" && \
-  if [ -z ${CODE_RELEASE+x} ]; then \
-    CODE_RELEASE=$(curl -sX GET https://registry.yarnpkg.com/code-server \
-    | jq -r '."dist-tags".latest' | sed 's|^|v|'); \
-  fi && \
-  CODE_VERSION=$(echo "$CODE_RELEASE" | awk '{print substr($1,2); }') && \
-  yarn config set network-timeout 600000 -g && \
-  yarn --production --verbose --frozen-lockfile global add code-server@"$CODE_VERSION" && \
-  yarn cache clean && \
-  echo "**** clean up ****" && \
-  apt-get purge --auto-remove -y \
-    build-essential \
-    libx11-dev \
-    libxkbfile-dev \
-    libsecret-1-dev \
-    pkg-config && \
-  apt-get clean && \
-  rm -rf \
-    /tmp/* \
-    /var/lib/apt/lists/* \
-    /var/tmp/*
+# Use bash shell
+ENV SHELL=/bin/bash
 
-# add local files
-COPY /root /
+# Install unzip + rclone (support for remote filesystem)
+RUN sudo apt-get update && sudo apt-get install unzip -y
+RUN curl https://rclone.org/install.sh | sudo bash
 
-# ports and volumes
-EXPOSE 8443
+# Copy rclone tasks to /tmp, to potentially be used
+COPY deploy-container/rclone-tasks.json /tmp/rclone-tasks.json
+
+# Fix permissions for code-server
+RUN sudo chown -R coder:coder /home/coder/.local
+
+# You can add custom software and dependencies for your environment below
+# -----------
+RUN sudo apt-get install -y nodejs
+RUN sudo apt-get install -y build-essential
+RUN sudo apt-get install -y wget 
+RUN sudo apt-get -y install cmake
+RUN sudo apt-get install -y build-essential
+RUN sudo apt-get install -y  gdb
+                
+RUN code-server --install-extension esbenp.prettier-vscode
+
+RUN code-server --install-extension twxs.cmake 
+RUN code-server --install-extension ms-vscode.cmake-tools 
+RUN code-server --install-extension ms-python.python 
+RUN code-server --install-extension mhutchie.git-graph
+RUN code-server --install-extension christian-kohler.path-intellisense
+RUN wget https://github.com/microsoft/vscode-cpptools/releases/download/1.7.1/cpptools-linux.vsix
+RUN wget https://github.com/formulahendry/vscode-code-runner/releases/download/0.9.17/code-runner-0.9.17.vsix
+RUN sudo apt-get update
+RUN sudo apt-get install -y python3 python3-venv python3-pip
+RUN sudo apt-get install -y python3-numpy
+RUN sudo apt-get install -y python3-pip
+RUN sudo apt-get install -y python3-matplotlib
+RUN sudo apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 wine64
+COPY deploy-container/myTool/cie1_exercise_03_vectorcomputations2_solution /home/coder/project/cie1_exercise_03_vectorcomputations2_solution
+COPY deploy-container/myTool/implicitgeometry /home/coder/project/implicitgeometry
+# Install a VS Code extension:
+# Note: we use a different marketplace than VS Code. See https://github.com/cdr/code-server/blob/main/docs/FAQ.md#differences-compared-to-vs-code
+# RUN code-server --install-extension esbenp.prettier-vscode
+
+# Install apt packages:
+# RUN sudo apt-get install -y ubuntu-make
+
+# Copy files: 
+# COPY deploy-container/myTool /home/coder/myTool
+
+# -----------
+RUN code-server --install-extension code-runner-0.9.17.vsix 
+RUN code-server --install-extension cpptools-linux.vsix 
+
+RUN sudo rm -rf  /home/coder/.local/share/code-server/User/settings.json
+COPY deploy-container/myTool/settings.json /home/coder/.local/share/code-server/User/
+
+# Port
+ENV PORT=8080
+
+# Use our custom entrypoint script first
+COPY deploy-container/entrypoint.sh /usr/bin/deploy-container-entrypoint.sh
+ENTRYPOINT ["/usr/bin/deploy-container-entrypoint.sh"]
